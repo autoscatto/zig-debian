@@ -20,13 +20,28 @@ jobs:
     - name: Identify new tags
       id: set_tags
       run: |
+        # Ensure jq is available
+        sudo apt-get install -y jq
+
+        # Fetch tags and save to file
         git tag | grep -v '^master$' > release_tags.txt
-        if [ -f processed_tags.json ]; then
-          PROCESSED_TAGS=$(cat processed_tags.json | jq -r '.processed_tags[]?')
-          NEW_TAGS=$(grep -vFf <(echo "$PROCESSED_TAGS") release_tags.txt || true)
-        else
-          NEW_TAGS=$(cat release_tags.txt)
+
+        # Initialize processed_tags.json if not exists
+        if [ ! -f processed_tags.json ]; then
+          echo '{"processed_tags":[]}' > processed_tags.json
         fi
+
+        # Log contents for debugging
+        echo "Contents of release_tags.txt:"
+        cat release_tags.txt
+        echo "Contents of processed_tags.json:"
+        cat processed_tags.json
+
+        # Extract unprocessed tags
+        PROCESSED_TAGS=$(cat processed_tags.json | jq -r '.processed_tags[]?')
+        NEW_TAGS=$(grep -vFf <(echo "$PROCESSED_TAGS") release_tags.txt || echo "")
+
+        # Set the output for the step
         echo "::set-output name=tags::$(echo $NEW_TAGS | jq -R -s -c 'split("\n")[:-1]')"
 
     - name: Save processed tags
