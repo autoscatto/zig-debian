@@ -24,7 +24,7 @@ jobs:
         sudo apt-get install -y jq
 
         # Fetch tags and save to file
-        git tag | grep -v '^master$' > release_tags.txt
+        git tag | grep -v '^master$' > release_tags.txt || { echo "Failed to fetch tags"; exit 1; }
 
         # Initialize processed_tags.json if not exists
         if [ ! -f processed_tags.json ]; then
@@ -33,16 +33,38 @@ jobs:
 
         # Log contents for debugging
         echo "Contents of release_tags.txt:"
-        cat release_tags.txt
+        if [ -s release_tags.txt ]; then
+          cat release_tags.txt
+        else
+          echo "release_tags.txt is empty!"
+          exit 1
+        fi
+
         echo "Contents of processed_tags.json:"
-        cat processed_tags.json
+        if [ -s processed_tags.json ]; then
+          cat processed_tags.json
+        else
+          echo "processed_tags.json is empty or not valid JSON!"
+          exit 1
+        fi
 
         # Extract unprocessed tags
-        PROCESSED_TAGS=$(cat processed_tags.json | jq -r '.processed_tags[]?')
+        PROCESSED_TAGS=$(cat processed_tags.json | jq -r '.processed_tags[]?' || { echo "Error reading processed_tags.json"; exit 1; })
         NEW_TAGS=$(grep -vFf <(echo "$PROCESSED_TAGS") release_tags.txt || echo "")
 
+        # Debug extracted tags
+        echo "Processed tags: $PROCESSED_TAGS"
+        echo "New tags: $NEW_TAGS"
+
+        if [ -z "$NEW_TAGS" ]; then
+          echo "No new tags to process."
+          echo "::set-output name=tags::[]"
+          exit 0
+        fi
+
         # Set the output for the step
-        echo "::set-output name=tags::$(echo $NEW_TAGS | jq -R -s -c 'split("\n")[:-1]')"
+        echo "::set-output name=tags::$(echo $NEW_TAGS | jq -R -s -c 'split("\n")[:-1]' || { echo "Error formatting tags"; exit 1; })"
+      shell: /usr/bin/bash -e {0}
 
     - name: Save processed tags
       if: ${{ steps.set_tags.outputs.tags != '[]' }}
