@@ -1,0 +1,61 @@
+name: Build an release debian Zig Packages
+
+on:
+  schedule:
+    - cron: "0 0 * * 0" # Every sunday midnight
+  workflow_dispatch:
+
+jobs:
+  build_and_release:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Fetch tags
+      run: git fetch --tags
+
+    - name: Identify new tags
+      id: new_tags
+      run: |
+        git tag | grep -v '^master$' > release_tags.txt
+        if [ -f processed_tags.json ]; then
+          PROCESSED_TAGS=$(cat processed_tags.json | jq -r '.processed_tags[]?')
+          NEW_TAGS=$(grep -vFf <(echo "$PROCESSED_TAGS") release_tags.txt || true)
+        else
+          NEW_TAGS=$(cat release_tags.txt)
+        fi
+        echo "::set-output name=tags::$(echo $NEW_TAGS | jq -R -s -c 'split("\n")[:-1]')"
+
+    - name: Save new tags
+      if: ${{ steps.new_tags.outputs.tags != '[]' }}
+      run: |
+        echo ${{ steps.new_tags.outputs.tags }} > new_tags.json
+        jq --argjson new_tags "$(cat new_tags.json)" '.processed_tags += $new_tags' processed_tags.json > temp.json
+        mv temp.json processed_tags.json
+        git add processed_tags.json
+        git commit -m "Update processed tags"
+        git push origin state
+
+    - name: Run build matrix
+      if: ${{ steps.new_tags.outputs.tags != '[]' }}
+      strategy:
+        matrix:
+          tag: ${{ fromJson(steps.new_tags.outputs.tags) }}
+          arch: [x86_64-linux, aarch64-linux, armv7a-linux]
+      run: |
+        ./scripts/build_zig.sh ${{ matrix.tag }} ${{ matrix.arch }}
+
+    - name: Create GitHub Release
+      if: ${{ steps.new_tags.outputs.tags != '[]' }}
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          zig-${{ matrix.arch }}-${{ matrix.tag }}/zig_${{ matrix.tag }}_${{ matrix.arch }}.deb
+        tag_name: ${{ matrix.tag }}
+        name: "Release ${{ matrix.tag }}"
+        body: "Packages for ${{ matrix.tag }}:
+        - x86_64-linux
+        - aarch64-linux
+        - armv7a-linux"
+
