@@ -31,15 +31,15 @@ jobs:
           PROCESSED_TAGS=$(jq -r '.processed_tags[]?' processed_tags.json)
           NEW_TAGS=$(echo "$TAGS" | grep -vFf <(echo "$PROCESSED_TAGS") || true)
 
-          echo "::set-output name=new_tags::$(echo $NEW_TAGS | jq -R -s -c 'split("\n")[:-1]')"
+          echo "new_tags=$(echo $NEW_TAGS | jq -R -s -c 'split(\"\\n\")[:-1]')" >> $GITHUB_ENV
 
   matrix_build:
     needs: fetch_tags
-    if: needs.fetch_tags.outputs.new_tags != "[]"
+    if: ${{ env.new_tags != '[]' }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        tag: ${{ fromJson(needs.fetch_tags.outputs.new_tags) }}
+        tag: ${{ fromJson(env.new_tags) }}
         arch: [x86_64-linux, aarch64-linux, armv7a-linux]
 
     steps:
@@ -67,8 +67,8 @@ jobs:
           gh release upload "$VERSION" "$DEB_FILE" --clobber
 
       - name: Update Processed Tags
-        if: steps.fetch_tags.outputs.new_tags != "[]"
+        if: ${{ env.new_tags != '[]' }}
         run: |
-          jq -n --argjson new_tags "$(echo ${{ steps.fetch_tags.outputs.new_tags }} | jq -r '.')" '
+          jq -n --argjson new_tags "$(echo ${{ env.new_tags }} | jq -r '.')" '
             {processed_tags: (.processed_tags + $new_tags)}
           ' processed_tags.json > tmp.json && mv tmp.json processed_tags.json
