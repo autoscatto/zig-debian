@@ -61,7 +61,8 @@ jobs:
           zig-${{ matrix.arch }}-${{ matrix.tag }}/zig_${{ matrix.tag }}_${{ matrix.arch }}.deb
         tag_name: ${{ matrix.tag }}
         name: "Release ${{ matrix.tag }}"
-        body: "Packages for ${{ matrix.tag }}:
-        - x86_64-linux
-        - aarch64-linux
-        - armv7a-linux
+        body: |
+          Packages for ${{ matrix.tag }}:
+          - x86_64-linux
+          - aarch64-linux
+          - armv7a-linux
