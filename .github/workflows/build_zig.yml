@@ -47,24 +47,24 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Build Zig
-            run: |
-              chmod +x scripts/build_zig.sh
-              ./scripts/build_zig.sh ${{ matrix.tag }} ${{ matrix.arch }}
+        run: |
+          chmod +x scripts/build_zig.sh
+          ./scripts/build_zig.sh ${{ matrix.tag }} ${{ matrix.arch }}
 
-          - name: Upload DEB to Release
-            env:
-              GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-            run: |
-              VERSION=${{ matrix.tag }}
-              ARCH=${{ matrix.arch }}
-              DEB_FILE=$(find . -name "zig_${VERSION}_${ARCH}.deb" -type f)
+      - name: Upload DEB to Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=${{ matrix.tag }}
+          ARCH=${{ matrix.arch }}
+          DEB_FILE=$(find . -name "zig_${VERSION}_${ARCH}.deb" -type f)
 
-              if [ -z "$DEB_FILE" ]; then
-                echo "Error: DEB file not found for $VERSION $ARCH"
-                exit 1
-              fi
+          if [ -z "$DEB_FILE" ]; then
+            echo "Error: DEB file not found for $VERSION $ARCH"
+            exit 1
+          fi
 
-              gh release upload "$VERSION" "$DEB_FILE" --clobber
+          gh release upload "$VERSION" "$DEB_FILE" --clobber
 
       - name: Update Processed Tags
         if: steps.fetch_tags.outputs.new_tags != "[]"
