@@ -6,7 +6,7 @@ on:
     - cron: '0 0 * * 0'  # Weekly trigger
 
 jobs:
-  build:
+  fetch_tags:
     runs-on: ubuntu-latest
 
     steps:
@@ -33,19 +33,20 @@ jobs:
 
           echo "::set-output name=new_tags::$(echo $NEW_TAGS | jq -R -s -c 'split("\n")[:-1]')"
 
-      - name: Matrix Build for New Tags
-        if: steps.fetch_tags.outputs.new_tags != "[]"
-        strategy:
-          matrix:
-            tag: ${{ fromJson(steps.fetch_tags.outputs.new_tags) }}
-            arch: [x86_64-linux, aarch64-linux, armv7a-linux]
-        runs-on: ubuntu-latest
+  matrix_build:
+    needs: fetch_tags
+    if: needs.fetch_tags.outputs.new_tags != "[]"
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        tag: ${{ fromJson(needs.fetch_tags.outputs.new_tags) }}
+        arch: [x86_64-linux, aarch64-linux, armv7a-linux]
 
-        steps:
-          - name: Checkout Repository
-            uses: actions/checkout@v3
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
 
-          - name: Build Zig
+      - name: Build Zig
             run: |
               chmod +x scripts/build_zig.sh
               ./scripts/build_zig.sh ${{ matrix.tag }} ${{ matrix.arch }}
