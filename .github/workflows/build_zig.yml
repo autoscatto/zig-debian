@@ -1,9 +1,9 @@
 name: Build Zig Releases
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # Manual trigger
   schedule:
-    - cron: '0 0 * * 0'
+    - cron: '0 0 * * 0'  # Weekly trigger
 
 jobs:
   build:
@@ -22,19 +22,15 @@ jobs:
         id: fetch_tags
         run: |
           curl -s https://ziglang.org/download/index.json -o index.json
-          
           TAGS=$(jq -r 'keys[] | select(. != "master")' index.json)
-          echo "Found Tags: $TAGS"
-          
+
           if [ ! -f processed_tags.json ]; then
             echo '{"processed_tags":[]}' > processed_tags.json
           fi
-          
+
           PROCESSED_TAGS=$(jq -r '.processed_tags[]?' processed_tags.json)
-          
           NEW_TAGS=$(echo "$TAGS" | grep -vFf <(echo "$PROCESSED_TAGS") || true)
-          echo "New Tags: $NEW_TAGS"
-          
+
           echo "::set-output name=new_tags::$(echo $NEW_TAGS | jq -R -s -c 'split("\n")[:-1]')"
 
       - name: Matrix Build for New Tags
@@ -44,6 +40,7 @@ jobs:
             tag: ${{ fromJson(steps.fetch_tags.outputs.new_tags) }}
             arch: [x86_64-linux, aarch64-linux, armv7a-linux]
         runs-on: ubuntu-latest
+
         steps:
           - name: Checkout Repository
             uses: actions/checkout@v3
@@ -67,7 +64,7 @@ jobs:
               fi
 
               gh release upload "$VERSION" "$DEB_FILE" --clobber
-              
+
       - name: Update Processed Tags
         if: steps.fetch_tags.outputs.new_tags != "[]"
         run: |
