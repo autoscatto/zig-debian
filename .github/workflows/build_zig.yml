@@ -1,105 +1,76 @@
-name: Build Zig Packages
+name: Build Zig Releases
 
 on:
+  workflow_dispatch:
   schedule:
-    - cron: "0 0 * * 0" # Every Sunday at midnight
-  workflow_dispatch: # Manual trigger
+    - cron: '0 0 * * 0'
 
 jobs:
-  identify_new_tags:
+  build:
     runs-on: ubuntu-latest
-    outputs:
-      tags: ${{ steps.set_tags.outputs.tags }}
+
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+      - name: Checkout Repository
+        uses: actions/checkout@v3
 
-    - name: Fetch tags
-      run: git fetch --tags
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq curl
 
-    - name: Identify new tags
-      id: set_tags
-      run: |
-        # Ensure jq is available
-        sudo apt-get install -y jq
+      - name: Fetch Zig Tags
+        id: fetch_tags
+        run: |
+          curl -s https://ziglang.org/download/index.json -o index.json
+          
+          TAGS=$(jq -r 'keys[] | select(. != "master")' index.json)
+          echo "Found Tags: $TAGS"
+          
+          if [ ! -f processed_tags.json ]; then
+            echo '{"processed_tags":[]}' > processed_tags.json
+          fi
+          
+          PROCESSED_TAGS=$(jq -r '.processed_tags[]?' processed_tags.json)
+          
+          NEW_TAGS=$(echo "$TAGS" | grep -vFf <(echo "$PROCESSED_TAGS") || true)
+          echo "New Tags: $NEW_TAGS"
+          
+          echo "::set-output name=new_tags::$(echo $NEW_TAGS | jq -R -s -c 'split("\n")[:-1]')"
 
-        # Fetch tags and save to file
-        git tag | grep -v '^master$' > release_tags.txt || { echo "Failed to fetch tags"; exit 1; }
+      - name: Matrix Build for New Tags
+        if: steps.fetch_tags.outputs.new_tags != "[]"
+        strategy:
+          matrix:
+            tag: ${{ fromJson(steps.fetch_tags.outputs.new_tags) }}
+            arch: [x86_64-linux, aarch64-linux, armv7a-linux]
+        runs-on: ubuntu-latest
+        steps:
+          - name: Checkout Repository
+            uses: actions/checkout@v3
 
-        # Initialize processed_tags.json if not exists
-        if [ ! -f processed_tags.json ]; then
-          echo '{"processed_tags":[]}' > processed_tags.json
-        fi
+          - name: Build Zig
+            run: |
+              chmod +x scripts/build_zig.sh
+              ./scripts/build_zig.sh ${{ matrix.tag }} ${{ matrix.arch }}
 
-        # Log contents for debugging
-        echo "Contents of release_tags.txt:"
-        if [ -s release_tags.txt ]; then
-          cat release_tags.txt
-        else
-          echo "release_tags.txt is empty!"
-          exit 1
-        fi
+          - name: Upload DEB to Release
+            env:
+              GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            run: |
+              VERSION=${{ matrix.tag }}
+              ARCH=${{ matrix.arch }}
+              DEB_FILE=$(find . -name "zig_${VERSION}_${ARCH}.deb" -type f)
 
-        echo "Contents of processed_tags.json:"
-        if [ -s processed_tags.json ]; then
-          cat processed_tags.json
-        else
-          echo "processed_tags.json is empty or not valid JSON!"
-          exit 1
-        fi
+              if [ -z "$DEB_FILE" ]; then
+                echo "Error: DEB file not found for $VERSION $ARCH"
+                exit 1
+              fi
 
-        # Extract unprocessed tags
-        PROCESSED_TAGS=$(cat processed_tags.json | jq -r '.processed_tags[]?' || { echo "Error reading processed_tags.json"; exit 1; })
-        NEW_TAGS=$(grep -vFf <(echo "$PROCESSED_TAGS") release_tags.txt || echo "")
-
-        # Debug extracted tags
-        echo "Processed tags: $PROCESSED_TAGS"
-        echo "New tags: $NEW_TAGS"
-
-        if [ -z "$NEW_TAGS" ]; then
-          echo "No new tags to process."
-          echo "::set-output name=tags::[]"
-          exit 0
-        fi
-
-        # Set the output for the step
-        echo "::set-output name=tags::$(echo $NEW_TAGS | jq -R -s -c 'split("\n")[:-1]' || { echo "Error formatting tags"; exit 1; })"
-      shell: /usr/bin/bash -e {0}
-
-    - name: Save processed tags
-      if: ${{ steps.set_tags.outputs.tags != '[]' }}
-      run: |
-        echo ${{ steps.set_tags.outputs.tags }} > new_tags.json
-        jq --argjson new_tags "$(cat new_tags.json)" '.processed_tags += $new_tags' processed_tags.json > temp.json
-        mv temp.json processed_tags.json
-        git add processed_tags.json
-        git commit -m "Update processed tags"
-        git push origin state
-
-  build_and_release:
-    needs: identify_new_tags
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        tag: ${{ fromJson(needs.identify_new_tags.outputs.tags) }}
-        arch: [x86_64-linux, aarch64-linux, armv7a-linux]
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
-
-    - name: Run build script
-      run: |
-        ./scripts/build_zig.sh ${{ matrix.tag }} ${{ matrix.arch }}
-
-    - name: Upload to GitHub Release
-      uses: softprops/action-gh-release@v1
-      with:
-        files: |
-          zig-${{ matrix.arch }}-${{ matrix.tag }}/zig_${{ matrix.tag }}_${{ matrix.arch }}.deb
-        tag_name: ${{ matrix.tag }}
-        name: "Release ${{ matrix.tag }}"
-        body: |
-          Packages for ${{ matrix.tag }}:
-          - x86_64-linux
-          - aarch64-linux
-          - armv7a-linux
+              gh release upload "$VERSION" "$DEB_FILE" --clobber
+              
+      - name: Update Processed Tags
+        if: steps.fetch_tags.outputs.new_tags != "[]"
+        run: |
+          jq -n --argjson new_tags "$(echo ${{ steps.fetch_tags.outputs.new_tags }} | jq -r '.')" '
+            {processed_tags: (.processed_tags + $new_tags)}
+          ' processed_tags.json > tmp.json && mv tmp.json processed_tags.json
